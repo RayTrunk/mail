@@ -15,6 +15,8 @@ use std::rc::Weak;
 
 /// Tabs beyond this many are refused; each inactive mail tab keeps its rows.
 const MAX_TABS: usize = 32;
+/// Closed tabs that can be reopened, the newest last.
+const MAX_CLOSED: usize = 16;
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 /// How often, and for how long, a shown tab's reader looks for its laid-out
 /// message to scroll back to.
@@ -204,6 +206,13 @@ impl SavedTab {
     }
 }
 
+/// A closed tab that can be reopened where it was.
+struct ClosedTab {
+    index: usize,
+    place: Place,
+    title: String,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum Closed {
     /// Nothing was closed.
@@ -218,6 +227,7 @@ struct TabStrip {
     tabs: Vec<Tab>,
     active: usize,
     next_id: i32,
+    closed: Vec<ClosedTab>,
 }
 
 impl TabStrip {
@@ -226,6 +236,7 @@ impl TabStrip {
             tabs: Vec::new(),
             active: 0,
             next_id: 1,
+            closed: Vec::new(),
         };
         strip.insert(0, place, String::new(), None);
         strip
@@ -305,6 +316,18 @@ impl TabStrip {
         self.tabs.iter().position(|tab| tab.id == id)
     }
 
+    /// Keep a closed tab so it can be reopened.
+    fn remember(&mut self, index: usize, tab: &Tab) {
+        if self.closed.len() == MAX_CLOSED {
+            self.closed.remove(0);
+        }
+        self.closed.push(ClosedTab {
+            index,
+            place: tab.place.clone(),
+            title: tab.title.clone(),
+        });
+    }
+
     /// Close a tab. The only tab stays and returns to `home`, the inbox.
     fn close(&mut self, id: i32, home: &Place) -> Closed {
         let Some(index) = self.index_of(id) else {
@@ -314,15 +337,20 @@ impl TabStrip {
             if self.tabs[0].place == *home {
                 return Closed::Missing;
             }
-            self.tabs[0] = Tab {
-                id,
-                place: home.clone(),
-                title: String::new(),
-                rows: None,
-            };
+            let tab = std::mem::replace(
+                &mut self.tabs[0],
+                Tab {
+                    id,
+                    place: home.clone(),
+                    title: String::new(),
+                    rows: None,
+                },
+            );
+            self.remember(0, &tab);
             return Closed::Active(0);
         }
-        self.tabs.remove(index);
+        let tab = self.tabs.remove(index);
+        self.remember(index, &tab);
         if index == self.active {
             // Browsers activate the tab that took the closed tab's place.
             self.active = index.min(self.tabs.len() - 1);
@@ -333,6 +361,61 @@ impl TabStrip {
             }
             Closed::Inactive
         }
+    }
+
+    /// Close every tab but `id`. Closed tabs are remembered right to left, so
+    /// reopening them one by one puts each back where it was.
+    fn close_others(&mut self, id: i32) -> Closed {
+        let Some(keep) = self.index_of(id) else {
+            return Closed::Missing;
+        };
+        if self.tabs.len() == 1 {
+            return Closed::Missing;
+        }
+        let active_closed = keep != self.active;
+        let mut tabs = std::mem::take(&mut self.tabs);
+        let kept = tabs.remove(keep);
+        for (index, tab) in tabs.iter().enumerate().rev() {
+            let index = if index >= keep { index + 1 } else { index };
+            self.remember(index, tab);
+        }
+        self.tabs.push(kept);
+        self.active = 0;
+        if active_closed {
+            Closed::Active(0)
+        } else {
+            Closed::Inactive
+        }
+    }
+
+    /// Close the tabs to the right of `id`.
+    fn close_to_right(&mut self, id: i32) -> Closed {
+        let Some(keep) = self.index_of(id) else {
+            return Closed::Missing;
+        };
+        if keep + 1 == self.tabs.len() {
+            return Closed::Missing;
+        }
+        let closed = self.tabs.split_off(keep + 1);
+        for (offset, tab) in closed.iter().enumerate().rev() {
+            self.remember(keep + 1 + offset, tab);
+        }
+        if self.active > keep {
+            self.active = keep;
+            Closed::Active(keep)
+        } else {
+            Closed::Inactive
+        }
+    }
+
+    /// Reopen the most recently closed tab where it was.
+    fn reopen(&mut self) -> Option<usize> {
+        if self.tabs.len() >= MAX_TABS {
+            return None;
+        }
+        let closed = self.closed.pop()?;
+        let index = closed.index.min(self.tabs.len());
+        Some(self.insert(index, closed.place, closed.title, None))
     }
 
     fn move_tab(&mut self, id: i32, to: usize) {
@@ -360,6 +443,7 @@ impl TabStrip {
 pub(crate) enum Command {
     New,
     Close,
+    Reopen,
     Next,
     Previous,
     /// Zero-based tab index.
@@ -372,6 +456,7 @@ impl Command {
         Some(match value {
             "new" => Self::New,
             "close" => Self::Close,
+            "reopen" => Self::Reopen,
             "next" => Self::Next,
             "previous" => Self::Previous,
             "last" => Self::Last,
@@ -384,6 +469,7 @@ impl Command {
         match self {
             Self::New => "new".into(),
             Self::Close => "close".into(),
+            Self::Reopen => "reopen".into(),
             Self::Next => "next".into(),
             Self::Previous => "previous".into(),
             Self::Last => "last".into(),
@@ -422,6 +508,7 @@ pub(crate) fn shortcut(
             let text = text.to_lowercase();
             match (text.as_str(), shift) {
                 ("t", false) => Some(Command::New),
+                ("t", true) => Some(Command::Reopen),
                 ("w", false) => Some(Command::Close),
                 // Safari and Chrome on macOS also cycle with Command+Shift+[ ].
                 ("[" | "{", true) if cfg!(target_os = "macos") => Some(Command::Previous),
@@ -529,9 +616,31 @@ pub(crate) fn register(app: &AppWindow, context: TabContext) {
         }
     });
     let owner = Rc::clone(&tabs);
+    global.on_close_others(move |id| {
+        if owner.restored.get() {
+            owner.capture(false);
+            let closed = owner.strip.borrow_mut().close_others(id);
+            owner.closed(closed);
+        }
+    });
+    let owner = Rc::clone(&tabs);
+    global.on_close_to_right(move |id| {
+        if owner.restored.get() {
+            owner.capture(false);
+            let closed = owner.strip.borrow_mut().close_to_right(id);
+            owner.closed(closed);
+        }
+    });
+    let owner = Rc::clone(&tabs);
     global.on_create(move || {
         if owner.restored.get() {
             owner.create();
+        }
+    });
+    let owner = Rc::clone(&tabs);
+    global.on_reopen(move || {
+        if owner.restored.get() {
+            owner.reopen();
         }
     });
     let owner = Rc::clone(&tabs);
@@ -634,6 +743,7 @@ impl Tabs {
                 let id = self.strip.borrow().tabs[active].id;
                 self.close(id);
             }
+            Command::Reopen => self.reopen(),
             Command::Next => {
                 let index = self.strip.borrow().cycled(1);
                 self.activate(index);
@@ -656,6 +766,15 @@ impl Tabs {
         match opened {
             Some(index) => self.activate(index),
             None => self.refuse(),
+        }
+    }
+
+    fn reopen(&self) {
+        let reopened = self.strip.borrow_mut().reopen();
+        match reopened {
+            Some(index) => self.activate(index),
+            None if !self.strip.borrow().closed.is_empty() => self.refuse(),
+            None => {}
         }
     }
 
@@ -710,14 +829,17 @@ impl Tabs {
     }
 
     fn close(&self, id: i32) {
+        // Remember where the active tab is now, so reopening it returns there.
+        let active_id = {
+            let strip = self.strip.borrow();
+            strip.tabs[strip.active].id
+        };
+        if id == active_id {
+            self.capture(false);
+        }
         let home = self.home();
         let closed = self.strip.borrow_mut().close(id, &home);
-        match closed {
-            Closed::Missing => return,
-            Closed::Active(index) => self.restore(index),
-            Closed::Inactive => {}
-        }
-        self.changed();
+        self.closed(closed);
     }
 
     /// The inbox as the window names it: by its account when there is only
@@ -733,6 +855,15 @@ impl Tabs {
             },
             ..Place::default()
         }
+    }
+
+    fn closed(&self, closed: Closed) {
+        match closed {
+            Closed::Missing => return,
+            Closed::Active(index) => self.restore(index),
+            Closed::Inactive => {}
+        }
+        self.changed();
     }
 
     fn activate(&self, index: usize) {
@@ -1255,6 +1386,9 @@ impl Tabs {
                     tab.rows = None;
                 }
             }
+            for closed in &mut strip.closed {
+                forget(&mut closed.place, &mut closed.title, None);
+            }
         }
         self.changed();
     }
@@ -1345,6 +1479,10 @@ impl Tabs {
             }
         });
         sync_rows(&self.rows, rows);
+        if let Some(app) = self.app() {
+            app.global::<TabsUi>()
+                .set_can_reopen(!strip.closed.is_empty());
+        }
     }
 }
 
@@ -1421,6 +1559,7 @@ mod tests {
     const A: Scope = Scope::Folder(1);
     const B: Scope = Scope::Folder(2);
     const C: Scope = Scope::Folder(3);
+    const D: Scope = Scope::Folder(4);
 
     fn mail(scope: Scope) -> Place {
         Place {
@@ -1443,6 +1582,14 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn strip_of(places: &[Scope]) -> TabStrip {
+        let mut strip = TabStrip::new(mail(places[0]));
+        for (index, scope) in places.iter().enumerate().skip(1) {
+            strip.insert(index, mail(*scope), String::new(), None);
+        }
+        strip
     }
 
     #[test]
@@ -1491,6 +1638,50 @@ mod tests {
     }
 
     #[test]
+    fn closed_tabs_reopen_where_they_were() {
+        let mut strip = strip_of(&[A, B, C]);
+        let b = strip.tabs[1].id;
+        strip.close(b, &Place::default());
+        let c = strip.tabs[1].id;
+        strip.close(c, &Place::default());
+        assert_eq!(scopes(&strip), [A]);
+        // The newest closed tab comes back first.
+        assert_eq!(strip.reopen(), Some(1));
+        assert_eq!(scopes(&strip), [A, C]);
+        assert_eq!(strip.reopen(), Some(1));
+        assert_eq!(scopes(&strip), [A, B, C]);
+        assert_eq!(strip.reopen(), None);
+        // Reopened tabs are new tabs.
+        assert!(strip.tabs.iter().all(|tab| tab.id != b && tab.id != c));
+    }
+
+    #[test]
+    fn closing_other_tabs_or_those_to_the_right_can_be_undone_one_by_one() {
+        let mut strip = strip_of(&[A, B, C, D]);
+        strip.active = 3;
+        let c = strip.tabs[2].id;
+        // The active tab D closes, so the kept tab becomes active.
+        assert_eq!(strip.close_others(c), Closed::Active(0));
+        assert_eq!(scopes(&strip), [C]);
+        while strip.reopen().is_some() {}
+        assert_eq!(scopes(&strip), [A, B, C, D]);
+
+        strip.active = 0;
+        let b = strip.tabs[1].id;
+        assert_eq!(strip.close_to_right(b), Closed::Inactive);
+        assert_eq!(scopes(&strip), [A, B]);
+        let last = strip.tabs[1].id;
+        assert_eq!(strip.close_to_right(last), Closed::Missing);
+        while strip.reopen().is_some() {}
+        assert_eq!(scopes(&strip), [A, B, C, D]);
+
+        strip.active = 3;
+        let a = strip.tabs[0].id;
+        assert_eq!(strip.close_to_right(a), Closed::Active(0));
+        assert_eq!(scopes(&strip), [A]);
+    }
+
+    #[test]
     fn moving_tabs_keeps_the_active_tab_and_cycling_wraps() {
         let mut strip = TabStrip::new(mail(A));
         strip.open(mail(C), String::new(), None);
@@ -1510,6 +1701,11 @@ mod tests {
             assert!(strip.open(mail(B), String::new(), None).is_some());
         }
         assert!(strip.open(mail(B), String::new(), None).is_none());
+        let first = strip.tabs[1].id;
+        strip.close(first, &Place::default());
+        strip.open(mail(C), String::new(), None);
+        assert_eq!(strip.reopen(), None, "a full strip reopens nothing");
+        assert_eq!(strip.closed.len(), 1, "and keeps the closed tab");
     }
 
     #[test]
@@ -1604,6 +1800,7 @@ mod tests {
         for command in [
             Command::New,
             Command::Close,
+            Command::Reopen,
             Command::Next,
             Command::Previous,
             Command::Last,
@@ -1720,9 +1917,11 @@ mod tests {
         assert_eq!(active(), 0);
         ui.invoke_command("close".into());
         assert_eq!(rows.row_count(), 2);
-        ui.invoke_create();
-        ui.invoke_select(id(0));
-        assert_eq!(active(), 0);
+        assert!(ui.get_can_reopen());
+        ui.invoke_command("reopen".into());
+        assert_eq!(rows.row_count(), 3);
+        assert_eq!(active(), 0, "the reopened tab is shown where it was");
+        assert!(!ui.get_can_reopen());
 
         // Settings belongs to the tab it was opened in.
         app.set_settings_tab("Data".into());
@@ -1746,9 +1945,14 @@ mod tests {
         ui.invoke_select(id(0));
         assert_eq!(app.get_active_view(), "calendar");
 
+        ui.invoke_close_others(id(1));
+        assert_eq!(rows.row_count(), 1);
+        ui.invoke_reopen();
+        ui.invoke_reopen();
+        assert_eq!(rows.row_count(), 3);
+        ui.invoke_close_to_right(id(0));
+        assert_eq!(rows.row_count(), 1);
         ui.invoke_move(id(0), 1);
-        ui.invoke_close(id(0));
-        ui.invoke_close(id(0));
         ui.invoke_close(id(0));
         assert_eq!(rows.row_count(), 1, "the last tab stays open");
 
@@ -1758,6 +1962,7 @@ mod tests {
         ui.invoke_reset();
         assert_eq!(rows.row_count(), 1, "reset leaves one Inbox tab");
         assert_eq!(rows.row_data(0).unwrap().title, "");
+        assert!(!ui.get_can_reopen());
     }
 
     /// Presses, drags and clicks on the rendered strip, where a rebuilt row
@@ -2044,6 +2249,10 @@ mod tests {
         };
         let character = |text: &str| Key::Character(text.into());
         assert_eq!(shortcut(&character("t"), primary), Some(Command::New));
+        assert_eq!(
+            shortcut(&character("T"), primary | ModifiersState::SHIFT),
+            Some(Command::Reopen)
+        );
         assert_eq!(shortcut(&character("W"), primary), Some(Command::Close));
         assert_eq!(shortcut(&character("1"), primary), Some(Command::Select(0)));
         assert_eq!(shortcut(&character("9"), primary), Some(Command::Last));

@@ -346,16 +346,23 @@ export global TabsUi {
     in property <[TabRow]> rows;
     // True while the desktop top bar shows the tabs.
     in property <bool> enabled;
+    // A closed tab can be reopened.
+    in property <bool> can-reopen;
     callback select(int);
     callback close(int);
+    // Close every tab except this one, or the tabs to its right.
+    callback close-others(int);
+    callback close-to-right(int);
     callback create();
+    // Reopen the most recently closed tab.
+    callback reopen();
     // Move the tab with this id to a new index.
     callback move(int, int);
     // Open a conversation from the current list in a new tab; the flag
     // activates the tab, otherwise it opens in the background.
     callback open-conversation(int, bool);
-    // Keyboard commands: "new", "close", "next", "previous", "last", or a
-    // zero-based index.
+    // Keyboard commands: "new", "close", "reopen", "next", "previous",
+    // "last", or a zero-based index.
     callback command(string);
     // The active tab's place changed through ordinary navigation.
     callback navigated();
@@ -515,104 +522,140 @@ component TabItem inherits Rectangle {
         }
     }
 
-    hit := TouchArea {
+    menu-area := ContextMenuArea {
         width: parent.width;
         height: parent.height;
-        property <bool> dragging;
-        property <length> travel;
-        // The tab the left button went down on; this element can come to
-        // show another while it is held.
-        property <int> pressed-id: -1;
-        // A middle press here closes the tab when released over it.
-        property <bool> middle-pressed;
-        mouse-cursor: pointer;
-        accessible-role: tab;
-        accessible-label: root.title;
-        accessible-item-selectable: true;
-        accessible-item-selected: root.entry.active;
-        accessible-item-index: root.index;
-        accessible-action-default => { TabsUi.select(root.entry.id); }
-        pointer-event(event) => {
-            if event.kind == PointerEventKind.cancel {
-                self.pressed-id = -1;
-                self.middle-pressed = false;
-                root.end-drag();
-            } else if event.kind == PointerEventKind.down && event.button != PointerEventButton.left
-                && (self.pressed || self.dragging) {
-                // Another button while the tab is held lets it go.
-                self.pressed-id = -1;
-                root.end-drag();
-            } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                root.tooltip-dismissed = true;
-                self.pressed-id = root.entry.id;
-                TabsUi.select(root.entry.id);
-            } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
-                if self.dragging {
-                    root.dropped(self.travel);
-                }
-                self.dragging = false;
-                self.travel = 0px;
-                self.pressed-id = -1;
-            } else if event.button == PointerEventButton.middle && event.kind == PointerEventKind.down {
-                self.middle-pressed = true;
-            } else if event.button == PointerEventButton.middle && event.kind == PointerEventKind.up {
-                // Only when released over the tab it was pressed on.
-                if self.middle-pressed && self.mouse-x >= 0px && self.mouse-x < self.width
-                    && self.mouse-y >= 0px && self.mouse-y < self.height {
-                    root.close();
-                }
-                self.middle-pressed = false;
-            }
-        }
-        // The wheel leaves the tab and the strip hovered.
-        scroll-event(event) => { return accept; }
-        moved => {
-            if self.pressed && self.pressed-id == root.entry.id && !self.dragging
-                && abs(self.mouse-x - self.pressed-x) > 6px {
-                self.dragging = true;
-            }
-            if self.dragging {
-                // The tab stays within the strip.
-                self.travel = max(-root.index * root.width,
-                    min((root.count - 1 - root.index) * root.width, self.mouse-x - self.pressed-x));
-                root.dragged(self.travel);
-            }
-        }
 
-        // Inside the tab's hit area, so pointing at it keeps the tab hovered.
-        if root.labelled && (root.entry.active || root.hovered) : Rectangle {
-            x: root.offset + parent.width - 28px;
-            y: (parent.height - self.height) / 2;
-            width: 20px;
-            height: 20px;
-            border-radius: 4px;
-            background: close-hit.pressed ? root.title-color.with-alpha(0.18)
-                : close-hit.has-hover ? root.title-color.with-alpha(0.10) : transparent;
-
-            Image {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                width: 12px;
-                height: 12px;
-                source: @image-url("../icons/lucide/outline/x.svg");
-                colorize: close-hit.has-hover ? root.title-color : root.text-color;
-                accessible-role: none;
-            }
-            close-hit := TouchArea {
-                mouse-cursor: pointer;
-                accessible-role: button;
-                accessible-label: @tr("Close tab");
-                accessible-action-default => { TabsUi.close(root.entry.id); }
-                clicked => { root.close(); }
-                // The button takes every press over it; a middle click closes
-                // the tab as it does on the rest of it.
-                pointer-event(event) => {
-                    if event.button == PointerEventButton.middle && event.kind == PointerEventKind.up
-                        && self.mouse-x >= 0px && self.mouse-x < self.width
+        hit := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            property <bool> dragging;
+            property <length> travel;
+            // The tab the left button went down on; this element can come to
+            // show another while it is held.
+            property <int> pressed-id: -1;
+            // A middle press here closes the tab when released over it.
+            property <bool> middle-pressed;
+            mouse-cursor: pointer;
+            accessible-role: tab;
+            accessible-label: root.title;
+            accessible-item-selectable: true;
+            accessible-item-selected: root.entry.active;
+            accessible-item-index: root.index;
+            accessible-action-default => { TabsUi.select(root.entry.id); }
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.cancel {
+                    self.pressed-id = -1;
+                    self.middle-pressed = false;
+                    root.end-drag();
+                } else if event.kind == PointerEventKind.down && event.button != PointerEventButton.left
+                    && (self.pressed || self.dragging) {
+                    // Another button while the tab is held lets it go.
+                    self.pressed-id = -1;
+                    root.end-drag();
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    root.tooltip-dismissed = true;
+                    self.pressed-id = root.entry.id;
+                    TabsUi.select(root.entry.id);
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                    if self.dragging {
+                        root.dropped(self.travel);
+                    }
+                    self.dragging = false;
+                    self.travel = 0px;
+                    self.pressed-id = -1;
+                } else if event.button == PointerEventButton.middle && event.kind == PointerEventKind.down {
+                    self.middle-pressed = true;
+                } else if event.button == PointerEventButton.middle && event.kind == PointerEventKind.up {
+                    // Only when released over the tab it was pressed on.
+                    if self.middle-pressed && self.mouse-x >= 0px && self.mouse-x < self.width
                         && self.mouse-y >= 0px && self.mouse-y < self.height {
                         root.close();
                     }
+                    self.middle-pressed = false;
+                } else if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                    menu-area.show({ x: self.mouse-x, y: self.mouse-y });
                 }
+            }
+            // The wheel leaves the tab and the strip hovered.
+            scroll-event(event) => { return accept; }
+            moved => {
+                if self.pressed && self.pressed-id == root.entry.id && !self.dragging
+                    && abs(self.mouse-x - self.pressed-x) > 6px {
+                    self.dragging = true;
+                }
+                if self.dragging {
+                    // The tab stays within the strip.
+                    self.travel = max(-root.index * root.width,
+                        min((root.count - 1 - root.index) * root.width, self.mouse-x - self.pressed-x));
+                    root.dragged(self.travel);
+                }
+            }
+
+            // Inside the tab's hit area, so pointing at it keeps the tab hovered.
+            if root.labelled && (root.entry.active || root.hovered) : Rectangle {
+                x: root.offset + parent.width - 28px;
+                y: (parent.height - self.height) / 2;
+                width: 20px;
+                height: 20px;
+                border-radius: 4px;
+                background: close-hit.pressed ? root.title-color.with-alpha(0.18)
+                    : close-hit.has-hover ? root.title-color.with-alpha(0.10) : transparent;
+
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 12px;
+                    height: 12px;
+                    source: @image-url("../icons/lucide/outline/x.svg");
+                    colorize: close-hit.has-hover ? root.title-color : root.text-color;
+                    accessible-role: none;
+                }
+                close-hit := TouchArea {
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: @tr("Close tab");
+                    accessible-action-default => { TabsUi.close(root.entry.id); }
+                    clicked => { root.close(); }
+                    // The button takes every press over it; other buttons act
+                    // as they do on the rest of the tab.
+                    pointer-event(event) => {
+                        if event.button == PointerEventButton.middle && event.kind == PointerEventKind.up
+                            && self.mouse-x >= 0px && self.mouse-x < self.width
+                            && self.mouse-y >= 0px && self.mouse-y < self.height {
+                            root.close();
+                        } else if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                            menu-area.show({ x: parent.x + self.mouse-x, y: parent.y + self.mouse-y });
+                        }
+                    }
+                }
+            }
+        }
+
+        Menu {
+            MenuItem {
+                title: @tr("New tab");
+                activated => { TabsUi.create(); }
+            }
+            MenuItem {
+                title: @tr("Reopen closed tab");
+                enabled: TabsUi.can-reopen;
+                activated => { TabsUi.reopen(); }
+            }
+            MenuSeparator {}
+            MenuItem {
+                title: @tr("Close tab");
+                activated => { TabsUi.close(root.entry.id); }
+            }
+            MenuItem {
+                title: @tr("Close other tabs");
+                enabled: root.count > 1;
+                activated => { TabsUi.close-others(root.entry.id); }
+            }
+            MenuItem {
+                title: @tr("Close tabs to the right");
+                enabled: root.index < root.count - 1;
+                activated => { TabsUi.close-to-right(root.entry.id); }
             }
         }
     }

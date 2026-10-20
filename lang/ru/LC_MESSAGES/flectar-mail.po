@@ -1373,7 +1373,7 @@ msgstr "Не удалось отметить сообщение как проч�
 msgid "Loading message…"
 msgstr "Загрузка сообщения…"
 
-#: ui/app.slint:499 ui/components/workspace-navigation.slint:715
+#: ui/app.slint:499 ui/components/workspace-navigation.slint:758
 #: ui/tray.slint:12 ui/tray.slint:13
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
@@ -2773,15 +2773,27 @@ msgstr "Настройки"
 msgid "Primary navigation"
 msgstr "Основная навигация"
 
-#: ui/components/workspace-navigation.slint:604
+#: ui/components/workspace-navigation.slint:617
 msgid "Close tab"
 msgstr "Закрыть вкладку"
 
-#: ui/components/workspace-navigation.slint:672
+#: ui/components/workspace-navigation.slint:637
 msgid "New tab"
 msgstr "Новая вкладка"
 
-#: ui/components/workspace-navigation.slint:770
+#: ui/components/workspace-navigation.slint:641
+msgid "Reopen closed tab"
+msgstr "Открыть закрытую вкладку"
+
+#: ui/components/workspace-navigation.slint:651
+msgid "Close other tabs"
+msgstr "Закрыть другие вкладки"
+
+#: ui/components/workspace-navigation.slint:656
+msgid "Close tabs to the right"
+msgstr "Закрыть вкладки справа"
+
+#: ui/components/workspace-navigation.slint:813
 msgid "Tabs"
 msgstr "Вкладки"
 

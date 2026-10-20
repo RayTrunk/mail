@@ -1389,7 +1389,7 @@ msgstr "No se pudo marcar el mensaje como leído: {}"
 msgid "Loading message…"
 msgstr "Cargando mensaje…"
 
-#: ui/app.slint:499 ui/components/workspace-navigation.slint:715
+#: ui/app.slint:499 ui/components/workspace-navigation.slint:758
 #: ui/tray.slint:12 ui/tray.slint:13
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
@@ -2795,15 +2795,27 @@ msgstr "Ajustes"
 msgid "Primary navigation"
 msgstr "Navegación principal"
 
-#: ui/components/workspace-navigation.slint:604
+#: ui/components/workspace-navigation.slint:617
 msgid "Close tab"
 msgstr "Cerrar pestaña"
 
-#: ui/components/workspace-navigation.slint:672
+#: ui/components/workspace-navigation.slint:637
 msgid "New tab"
 msgstr "Nueva pestaña"
 
-#: ui/components/workspace-navigation.slint:770
+#: ui/components/workspace-navigation.slint:641
+msgid "Reopen closed tab"
+msgstr "Reabrir la pestaña cerrada"
+
+#: ui/components/workspace-navigation.slint:651
+msgid "Close other tabs"
+msgstr "Cerrar las demás pestañas"
+
+#: ui/components/workspace-navigation.slint:656
+msgid "Close tabs to the right"
+msgstr "Cerrar las pestañas de la derecha"
+
+#: ui/components/workspace-navigation.slint:813
 msgid "Tabs"
 msgstr "Pestañas"
 
