@@ -401,6 +401,12 @@ struct FolderMutationUpdate {
     message: UiMessage,
     metadata: Option<mail::MailMetadata>,
     reveal_parent_id: Option<i64>,
+    /// Mailbox shown when the change was made. The result moves the list to
+    /// `metadata.scope` only if that mailbox is still shown.
+    issued_scope: Scope,
+    /// Folders a deletion removed. A list that moved into one of them since
+    /// goes to the inbox.
+    removed_folders: Vec<i64>,
 }
 
 struct MessageLoadUpdate {
@@ -2971,7 +2977,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 snapshot_is_current(&folder_update_state, metadata.account_revision)
             }) {
                 let mut state = folder_update_state.borrow_mut();
-                state.set_scope(metadata.scope);
+                // Another mailbox or tab shown since then keeps its place,
+                // unless it is a folder that was just deleted.
+                let shown_removed = matches!(
+                    state.scope,
+                    Scope::Folder(id) if update.removed_folders.contains(&id)
+                );
+                let navigate = shown_removed || state.scope == update.issued_scope;
+                if shown_removed {
+                    state.set_scope(Scope::UNIFIED_INBOX);
+                } else if navigate {
+                    state.set_scope(metadata.scope);
+                }
                 state.mailboxes = metadata.mailboxes;
                 state.unified_mailboxes = metadata.unified_mailboxes;
                 state.inbox_count = metadata.inbox_count;
@@ -2980,11 +2997,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     state.collapsed_folder_ids.remove(&parent_id);
                 }
                 drop(state);
-                if let Err(error) = refresh_from_source(
+                // Only leaving a deleted folder starts the list over; the
+                // mailbox the change was made in keeps its rows and position.
+                if !navigate {
+                    refresh_list_metadata(&app, &folder_update_state);
+                } else if let Err(error) = refresh_from_source(
                     &app,
                     &folder_update_state,
                     &folder_update_runtime,
-                    false,
+                    !shown_removed,
                     &[],
                 ) {
                     app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
@@ -3073,6 +3094,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     message,
                     metadata,
                     reveal_parent_id: (parent_id >= 0).then_some(i64::from(parent_id)),
+                    issued_scope: scope,
+                    removed_folders: Vec::new(),
                 })
                 .await;
         });
@@ -3104,6 +3127,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     message,
                     metadata,
                     reveal_parent_id: None,
+                    issued_scope: scope,
+                    removed_folders: Vec::new(),
                 })
                 .await;
         });
@@ -3117,30 +3142,40 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             return;
         };
         let folder_id = i64::from(folder_id);
-        let (current_scope, selected_folder_is_deleted) = {
+        let (current_scope, removed_folders) = {
             let state = delete_folder_state.borrow();
-            let selected_folder_id = match state.scope {
-                Scope::Folder(id) => Some(id),
-                _ => None,
-            };
             let parents = state
                 .mailboxes
                 .iter()
                 .filter(|mailbox| mailbox.folder_id >= 0)
                 .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
                 .collect::<HashMap<_, _>>();
-            let mut selected_folder_is_deleted = false;
-            let mut candidate = selected_folder_id.unwrap_or(-1);
-            let mut visited = HashSet::new();
-            while candidate >= 0 && visited.insert(candidate) {
-                if candidate == folder_id {
-                    selected_folder_is_deleted = true;
-                    break;
-                }
-                candidate = parents.get(&candidate).copied().unwrap_or(-1);
-            }
-            (state.scope, selected_folder_is_deleted)
+            // The folder and everything under it.
+            let removed_folders = std::iter::once(folder_id)
+                .chain(
+                    parents
+                        .keys()
+                        .copied()
+                        .filter(|&folder| folder != folder_id),
+                )
+                .filter(|&folder| {
+                    let mut candidate = folder;
+                    let mut visited = HashSet::new();
+                    while candidate >= 0 && visited.insert(candidate) {
+                        if candidate == folder_id {
+                            return true;
+                        }
+                        candidate = parents.get(&candidate).copied().unwrap_or(-1);
+                    }
+                    false
+                })
+                .collect::<Vec<_>>();
+            (state.scope, removed_folders)
         };
+        let selected_folder_is_deleted = matches!(
+            current_scope,
+            Scope::Folder(id) if removed_folders.contains(&id)
+        );
         let scope = if selected_folder_is_deleted {
             Scope::UNIFIED_INBOX
         } else {
@@ -3163,6 +3198,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     message,
                     metadata,
                     reveal_parent_id: None,
+                    issued_scope: current_scope,
+                    removed_folders,
                 })
                 .await;
         });
@@ -5235,23 +5272,26 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     .ok_or_else(|| "mail core is unavailable".to_owned())?
             };
             runtime_for_delete_label.block_on(core.delete_label(label_id))?;
-            {
+            let shown = {
                 let mut state = state_for_delete_label.borrow_mut();
-                if state.scope.label_id() == Some(label_id) {
-                    state.set_scope(Scope::UNIFIED_INBOX);
-                    state.page = 1;
-                    state.next_cursor = None;
-                    state.selected_id = None;
-                    state.preview_closed = false;
-                }
+                // Tabs on the label now reopen at the inbox.
+                state.labels.retain(|label| label.id != label_id);
+                state.scope.label_id() == Some(label_id)
+            };
+            if shown {
+                // The inbox replaces the label's rows, as if chosen in the
+                // sidebar.
+                app.invoke_select_scope(Scope::UNIFIED_INBOX.to_string().into());
+                Ok(())
+            } else {
+                refresh_from_source(
+                    &app,
+                    &state_for_delete_label,
+                    &runtime_for_delete_label,
+                    true,
+                    &[],
+                )
             }
-            refresh_from_source(
-                &app,
-                &state_for_delete_label,
-                &runtime_for_delete_label,
-                true,
-                &[],
-            )
         })();
         match result {
             Ok(()) => app.set_render_status(UiMessage::plain("Label deleted.")),
