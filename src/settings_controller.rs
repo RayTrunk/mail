@@ -680,3 +680,48 @@ fn save_oauth_settings(
         });
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hiding_settings_discards_an_unsaved_palette() {
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        struct Headless(Rc<MinimalSoftwareWindow>);
+        impl slint::platform::Platform for Headless {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window))).unwrap();
+        let app = AppWindow::new().unwrap();
+        let theme = app.global::<AppTheme>();
+        let draft = app.global::<ThemeDraft>();
+        let saved = theme.get_custom_light_primary();
+        app.set_settings_open(true);
+        slint::platform::update_timers_and_animations();
+
+        // The editor previews a color before it is saved.
+        draft.invoke_begin();
+        theme.set_custom_light_primary(slint::Color::from_rgb_u8(0xff, 0, 0));
+        app.set_settings_open(false);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(theme.get_custom_light_primary(), saved);
+        assert!(!draft.get_dirty());
+
+        // A saved palette stays.
+        app.set_settings_open(true);
+        slint::platform::update_timers_and_animations();
+        draft.invoke_begin();
+        let chosen = slint::Color::from_rgb_u8(0, 0x80, 0);
+        theme.set_custom_light_primary(chosen);
+        draft.set_dirty(false);
+        app.set_settings_open(false);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(theme.get_custom_light_primary(), chosen);
+    }
+}

@@ -34,6 +34,8 @@ import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
 export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportProfileRow } from "dialogs/import-dialog.slint";
+export { ThemeDraft } from "components/theme-editor.slint";
+import { ThemeDraft } from "components/theme-editor.slint";
 import { MailView } from "views/mail-view.slint";
 export { MessageColors } from "message-colors.slint";
 export { FilesUi, FileRow, OperationRow } from "views/files-view.slint";
@@ -791,7 +793,12 @@ export component AppWindow inherits Window {
     in-out property <length> email-scroll-document-height: 0px;
     in-out property <length> email-scroll-y: 0px;
     in-out property <bool> settings_open: false;
-    changed settings_open => { root.product-changed(root.active_view); }
+    changed settings_open => {
+        root.product-changed(root.active_view);
+        // Hiding Settings destroys the dialog before its own change handlers
+        // run, so an unsaved palette is discarded here.
+        if !root.settings_open { ThemeDraft.revert(); }
+    }
     in-out property <string> active_view: "mail";
     callback product-changed(string);
     private property <string> mail-compact-page: "list";
