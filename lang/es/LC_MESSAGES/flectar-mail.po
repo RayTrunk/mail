@@ -1389,77 +1389,77 @@ msgstr "No se pudo marcar el mensaje como leído: {}"
 msgid "Loading message…"
 msgstr "Cargando mensaje…"
 
-#: ui/app.slint:499 ui/components/workspace-navigation.slint:553
+#: ui/app.slint:499 ui/components/workspace-navigation.slint:700
 #: ui/tray.slint:12 ui/tray.slint:13
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1082 ui/app.slint:1095
+#: ui/app.slint:1084 ui/app.slint:1097
 msgid "Global Labels (local only)"
 msgstr "Etiquetas globales (solo locales)"
 
-#: ui/app.slint:1964
+#: ui/app.slint:1966
 msgid "Empty Trash?"
 msgstr "¿Vaciar la papelera?"
 
-#: ui/app.slint:1964 ui/views/files-view.slint:539
+#: ui/app.slint:1966 ui/views/files-view.slint:539
 msgid "Delete permanently?"
 msgstr "¿Eliminar permanentemente?"
 
-#: ui/app.slint:1968
+#: ui/app.slint:1970
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 "¿Eliminar permanentemente todos los mensajes de la papelera de todas las "
 "cuentas conectadas?"
 
-#: ui/app.slint:1969
+#: ui/app.slint:1971
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 "¿Eliminar permanentemente todos los mensajes de la papelera de esta cuenta?"
 
-#: ui/app.slint:1971
+#: ui/app.slint:1973
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 "¿Eliminar permanentemente las conversaciones seleccionadas de la papelera?"
 
-#: ui/app.slint:1972
+#: ui/app.slint:1974
 msgid "Permanently delete this conversation from Trash?"
 msgstr "¿Eliminar permanentemente esta conversación de la papelera?"
 
-#: ui/app.slint:1973 ui/components/calendar.slint:937
+#: ui/app.slint:1975 ui/components/calendar.slint:937
 msgid "This action cannot be undone."
 msgstr "Esta acción no se puede deshacer."
 
-#: ui/app.slint:1974
+#: ui/app.slint:1976
 msgid "Empty Trash"
 msgstr "Vaciar la papelera"
 
-#: ui/app.slint:1974 ui/views/files-view.slint:621
+#: ui/app.slint:1976 ui/views/files-view.slint:621
 msgid "Delete permanently"
 msgstr "Eliminar permanentemente"
 
-#: ui/app.slint:2144
+#: ui/app.slint:2146
 msgid "Mailbox startup failed"
 msgstr "Error al iniciar el buzón"
 
-#: ui/app.slint:2150
+#: ui/app.slint:2152
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail no pudo abrir el almacenamiento local"
 
-#: ui/app.slint:2163
+#: ui/app.slint:2165
 msgid "Diagnostic ID: {}"
 msgstr "ID de diagnóstico: {}"
 
-#: ui/app.slint:2166
+#: ui/app.slint:2168
 msgid "Diagnostic ID {}"
 msgstr "ID de diagnóstico {}"
 
-#: ui/app.slint:2171
+#: ui/app.slint:2173
 msgid "Retry"
 msgstr "Reintentar"
 
-#: ui/app.slint:2179 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2181 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "Copiar datos de diagnóstico"
 
@@ -2795,15 +2795,15 @@ msgstr "Ajustes"
 msgid "Primary navigation"
 msgstr "Navegación principal"
 
-#: ui/components/workspace-navigation.slint:403
-msgid "New tab"
-msgstr "Nueva pestaña"
-
-#: ui/components/workspace-navigation.slint:531
+#: ui/components/workspace-navigation.slint:589
 msgid "Close tab"
 msgstr "Cerrar pestaña"
 
-#: ui/components/workspace-navigation.slint:575
+#: ui/components/workspace-navigation.slint:657
+msgid "New tab"
+msgstr "Nueva pestaña"
+
+#: ui/components/workspace-navigation.slint:755
 msgid "Tabs"
 msgstr "Pestañas"
 

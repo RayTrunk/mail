@@ -355,6 +355,9 @@ pub(crate) struct TabContext {
 struct Tabs {
     context: TabContext,
     strip: RefCell<TabStrip>,
+    /// The strip's rows. They are updated in place: a new model would
+    /// recreate every tab element and drop a press or drag under way.
+    rows: Rc<VecModel<TabRow>>,
     save_timer: slint::Timer,
 }
 
@@ -364,9 +367,12 @@ pub(crate) fn register(app: &AppWindow, context: TabContext) {
     let tabs = Rc::new(Tabs {
         context,
         strip: RefCell::new(strip),
+        rows: Rc::new(VecModel::default()),
         save_timer: slint::Timer::default(),
     });
-    tabs.publish(app);
+    app.global::<TabsUi>()
+        .set_rows(ModelRc::from(Rc::clone(&tabs.rows)));
+    tabs.publish();
 
     // The UI callbacks own the tab state: nothing else keeps it alive, and
     // `Tabs` refers back to the window only weakly, so there is no cycle.
@@ -705,9 +711,7 @@ impl Tabs {
     fn reset(&self) {
         self.save_timer.stop();
         *self.strip.borrow_mut() = TabStrip::new(Location::inbox());
-        if let Some(app) = self.app() {
-            self.publish(&app);
-        }
+        self.publish();
         let path = self.context.path.clone();
         self.context.runtime.spawn_blocking(move || {
             if let Err(error) = std::fs::remove_file(&path)
@@ -720,9 +724,7 @@ impl Tabs {
 
     /// Publish rows, then save once the tab strip has been quiet briefly.
     fn changed(&self) {
-        if let Some(app) = self.app() {
-            self.publish(&app);
-        }
+        self.publish();
         let saved = self.strip.borrow().saved();
         let path = self.context.path.clone();
         let runtime = Rc::clone(&self.context.runtime);
@@ -738,21 +740,31 @@ impl Tabs {
             });
     }
 
-    fn publish(&self, app: &AppWindow) {
+    fn publish(&self) {
         let strip = self.strip.borrow();
-        let rows = strip
-            .tabs
-            .iter()
-            .enumerate()
-            .map(|(index, tab)| TabRow {
-                id: tab.id,
-                workspace: tab.location.workspace().into(),
-                title: tab.title.as_str().into(),
-                active: index == strip.active,
-            })
-            .collect::<Vec<_>>();
-        app.global::<TabsUi>()
-            .set_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+        let rows = strip.tabs.iter().enumerate().map(|(index, tab)| TabRow {
+            id: tab.id,
+            workspace: tab.location.workspace().into(),
+            title: tab.title.as_str().into(),
+            active: index == strip.active,
+        });
+        sync_rows(&self.rows, rows);
+    }
+}
+
+/// Update rows in place, so each tab keeps its element.
+fn sync_rows(model: &VecModel<TabRow>, rows: impl Iterator<Item = TabRow>) {
+    let mut count = 0;
+    for (index, row) in rows.enumerate() {
+        count = index + 1;
+        match model.row_data(index) {
+            Some(current) if current == row => {}
+            Some(_) => model.set_row_data(index, row),
+            None => model.push(row),
+        }
+    }
+    while model.row_count() > count {
+        model.remove(model.row_count() - 1);
     }
 }
 
@@ -769,6 +781,7 @@ fn cached_rows(state: &InboxState) -> Rc<CachedRows> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slint::platform::software_renderer::MinimalSoftwareWindow;
 
     const A: Scope = Scope::Folder(1);
     const B: Scope = Scope::Folder(2);
@@ -922,22 +935,46 @@ mod tests {
         assert_eq!(Command::parse("bogus"), None);
     }
 
-    /// Drives the registered callbacks the way the tab strip and keyboard
-    /// shortcuts do, so a strip borrow held across activation would panic.
     #[test]
-    fn selecting_cycling_and_closing_tabs_through_the_ui() {
-        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+    fn strip_rows_update_in_place() {
+        let model = VecModel::<TabRow>::default();
+        let row = |id: i32, active: bool| TabRow {
+            id,
+            workspace: "mail".into(),
+            title: "".into(),
+            active,
+        };
+        sync_rows(&model, [row(1, true), row(2, false)].into_iter());
+        sync_rows(
+            &model,
+            [row(1, false), row(2, true), row(3, false)].into_iter(),
+        );
+        assert_eq!(
+            model.iter().collect::<Vec<_>>(),
+            [row(1, false), row(2, true), row(3, false)]
+        );
+        sync_rows(&model, [row(3, true)].into_iter());
+        assert_eq!(model.iter().collect::<Vec<_>>(), [row(3, true)]);
+    }
+
+    /// A window and mail state without a display server or mail core.
+    fn headless() -> (
+        AppWindow,
+        TabContext,
+        tempfile::TempDir,
+        Rc<MinimalSoftwareWindow>,
+    ) {
+        use slint::platform::software_renderer::RepaintBufferType;
         use slint::platform::{Platform, WindowAdapter};
         struct Headless(Rc<MinimalSoftwareWindow>);
         impl Platform for Headless {
-            fn create_window_adapter(
-                &self,
-            ) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
                 Ok(self.0.clone())
             }
         }
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-        slint::platform::set_platform(Box::new(Headless(window))).unwrap();
+        // Tests in one process share the platform.
+        let _ = slint::platform::set_platform(Box::new(Headless(window.clone())));
         let app = AppWindow::new().unwrap();
         app.set_startup_ready(true);
         let runtime = Rc::new(
@@ -958,28 +995,29 @@ mod tests {
             false,
             WarmStartCacheWriter::spawn(&runtime, dir.path().join("warm.json")),
         )));
-        register(
-            &app,
-            TabContext {
-                app: app.as_weak(),
-                state,
-                runtime,
-                calendar: Rc::new(RefCell::new(LocalCalendarState::new(
-                    NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
-                ))),
-                mail_pagination_generation: Rc::new(Cell::new(0)),
-                mail_pagination_in_progress: Rc::new(Cell::new(false)),
-                path: dir.path().join("tabs.json"),
-            },
-        );
+        let context = TabContext {
+            app: app.as_weak(),
+            state,
+            runtime,
+            calendar: Rc::new(RefCell::new(LocalCalendarState::new(
+                NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
+            ))),
+            mail_pagination_generation: Rc::new(Cell::new(0)),
+            mail_pagination_in_progress: Rc::new(Cell::new(false)),
+            path: dir.path().join("tabs.json"),
+        };
+        (app, context, dir, window)
+    }
+
+    /// Drives the registered callbacks the way the tab strip and keyboard
+    /// shortcuts do, so a strip borrow held across activation would panic.
+    #[test]
+    fn selecting_cycling_and_closing_tabs_through_the_ui() {
+        let (app, context, _dir, _) = headless();
+        register(&app, context);
         let ui = app.global::<TabsUi>();
         ui.set_enabled(true);
-        let active = || {
-            ui.get_rows()
-                .iter()
-                .position(|row| row.active)
-                .unwrap()
-        };
+        let active = || ui.get_rows().iter().position(|row| row.active).unwrap();
         let id = |index: usize| ui.get_rows().row_data(index).unwrap().id;
 
         ui.invoke_create();
@@ -1006,6 +1044,101 @@ mod tests {
         ui.invoke_reset();
         assert_eq!(ui.get_rows().row_count(), 1, "reset leaves one Inbox tab");
         assert_eq!(ui.get_rows().row_data(0).unwrap().title, "");
+    }
+
+    /// Presses, drags and clicks on the rendered strip, where a rebuilt row
+    /// model used to drop the drag of a tab that was not active yet.
+    #[test]
+    fn the_strip_selects_drags_and_closes_tabs_with_the_pointer() {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let (app, context, _dir, window) = headless();
+        window.set_size(slint::PhysicalSize::new(1320, 800));
+        app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
+            id: 1,
+            ..Default::default()
+        }])));
+        register(&app, context);
+        let ui = app.global::<TabsUi>();
+        ui.invoke_restore_active();
+        let draw = || {
+            slint::platform::update_timers_and_animations();
+            window.draw_if_needed(|renderer| {
+                let mut buffer = vec![slint::Rgb8Pixel::default(); 1320 * 800];
+                renderer.render(&mut buffer, 1320);
+            });
+        };
+        ui.invoke_create();
+        ui.invoke_create();
+        draw();
+        assert!(ui.get_enabled(), "the desktop top bar shows the tabs");
+        let ids = || ui.get_rows().iter().map(|row| row.id).collect::<Vec<_>>();
+        let active = || ui.get_rows().iter().position(|row| row.active).unwrap();
+        let [a, b, c] = ids()[..] else {
+            panic!("three tabs");
+        };
+        assert_eq!(active(), 2);
+        // Three tabs share the bar at their widest, 240px each.
+        let at = |x: f32| slint::LogicalPosition::new(x, 22.0);
+        let pointer = |event| app.window().dispatch_event(event);
+        let left = PointerEventButton::Left;
+
+        pointer(WindowEvent::PointerMoved {
+            position: at(120.0),
+        });
+        pointer(WindowEvent::PointerPressed {
+            position: at(120.0),
+            button: left,
+        });
+        assert_eq!(active(), 0, "a press selects the tab");
+        pointer(WindowEvent::PointerMoved {
+            position: at(130.0),
+        });
+        pointer(WindowEvent::PointerMoved {
+            position: at(420.0),
+        });
+        draw();
+        pointer(WindowEvent::PointerReleased {
+            position: at(420.0),
+            button: left,
+        });
+        assert_eq!(ids(), [b, a, c], "the tab lands where it was dropped");
+        assert_eq!(active(), 1, "and stays active");
+        draw();
+
+        // An inactive tab shows its close button on hover; it closes the tab
+        // without selecting it.
+        pointer(WindowEvent::PointerMoved {
+            position: at(600.0),
+        });
+        draw();
+        let close = at(480.0 + 240.0 - 18.0);
+        pointer(WindowEvent::PointerMoved { position: close });
+        pointer(WindowEvent::PointerPressed {
+            position: close,
+            button: left,
+        });
+        pointer(WindowEvent::PointerReleased {
+            position: close,
+            button: left,
+        });
+        assert_eq!(ids(), [b, a]);
+        assert_eq!(active(), 1);
+        draw();
+
+        // A middle click closes a tab as well.
+        let middle = PointerEventButton::Middle;
+        pointer(WindowEvent::PointerMoved {
+            position: at(120.0),
+        });
+        pointer(WindowEvent::PointerPressed {
+            position: at(120.0),
+            button: middle,
+        });
+        pointer(WindowEvent::PointerReleased {
+            position: at(120.0),
+            button: middle,
+        });
+        assert_eq!(ids(), [a]);
     }
 
     #[cfg(desktop)]

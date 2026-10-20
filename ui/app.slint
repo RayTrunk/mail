@@ -982,6 +982,8 @@ export component AppWindow inherits Window {
     // product rail; in the integrated frame it also holds the window
     // controls. Compact layouts navigate from the bottom bar.
     private property <bool> top-bar: !root.compact-layout && root.connected_accounts.length > 0;
+    // A tone apart from the workspace, so the active tab can open into it.
+    private property <color> tab-strip-bg: AppTheme.sidebar-bg.mix(AppTheme.title, 0.94);
     changed top-bar => { root.sync-window-chrome(); }
     private property <length> content-x: root.safe-area-insets.left;
     private property <length> content-y: root.safe-area-insets.top + (root.top-bar ? WindowChrome.band-height : 0px);
@@ -2219,17 +2221,19 @@ export component AppWindow inherits Window {
         width: root.content-width;
         height: WindowChrome.band-height;
         z: 40000;
-        // The active tab follows the open conversation or mailbox.
-        live-title: root.active_view != "mail" ? ""
+        // The active tab follows Settings, the workspace, and in Mail the
+        // open conversation or mailbox.
+        live-workspace: root.settings_open ? "settings" : root.active_view;
+        live-title: root.settings_open || root.active_view != "mail" ? ""
             : root.has_selected && root.selected_subject != "" ? root.selected_subject
             : root.selected_scope_title;
-        background-color: root.sidebar-bg;
+        background-color: root.tab-strip-bg;
+        active-tab-background: root.sidebar-bg;
+        hover-background: AppTheme.sidebar-bg.mix(AppTheme.title, 0.90);
         divider-color: root.border;
         title-color: root.title-color;
+        text-color: root.secondary-text;
         accent-color: root.accent;
-        active-tab-background: AppTheme.surface;
-        hover-background: AppTheme.muted-control-bg;
-        muted-color: root.muted-text;
     }
 
     if WindowChrome.controls-visible : WindowControls {
@@ -2240,7 +2244,7 @@ export component AppWindow inherits Window {
         z: 50000;
         maximized: root.maximized;
         foreground: root.title-color;
-        background-color: AppTheme.surface;
+        background-color: root.top-bar ? root.tab-strip-bg : AppTheme.surface;
     }
 
     if root.client-frame : Rectangle {
