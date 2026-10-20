@@ -797,8 +797,10 @@ export component AppWindow inherits Window {
         root.product-changed(root.active_view);
         // Hiding Settings destroys the dialog before its own change handlers
         // run, so an unsaved palette is discarded here.
-        if !root.settings_open { ThemeDraft.revert(); }
+        if root.settings_open { root.settings-shown(); } else { ThemeDraft.revert(); }
     }
+    // Settings appeared, whichever way it was opened.
+    callback settings-shown();
     in-out property <string> active_view: "mail";
     callback product-changed(string);
     private property <string> mail-compact-page: "list";
