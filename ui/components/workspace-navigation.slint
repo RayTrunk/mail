@@ -333,7 +333,7 @@ export component CompactProductNav inherits Rectangle {
 
 export struct TabRow {
     id: int,
-    // "mail" | "calendar" | "contacts" | "files"
+    // "mail" | "calendar" | "contacts" | "files" | "settings"
     workspace: string,
     // Saved title for inactive tabs; empty uses the workspace name.
     title: string,
@@ -357,10 +357,25 @@ export global TabsUi {
     // Keyboard commands: "new", "close", "next", "previous", "last", or a
     // zero-based index.
     callback command(string);
+    // The active tab's place changed through ordinary navigation.
+    callback navigated();
+    // The mail list's scroll offset from the top, kept current by the mail
+    // view, and the offset a shown tab scrolls back to. Each request makes
+    // the list scroll to `list-restore` once its rows are laid out; a
+    // negative value means nothing is pending. `list-restore-view` names the
+    // mailbox, search and filter it belongs to, one per line.
+    in-out property <length> list-offset;
+    in-out property <length> list-restore: -1px;
+    in-out property <string> list-restore-view;
+    in-out property <int> list-restore-request;
     // Re-apply the active tab once local mail storage is ready.
     callback restore-active();
     // Forget every tab and its saved state, leaving one Inbox tab.
     callback reset();
+    // An account was removed: tabs forget its mailboxes and conversations.
+    callback account-removed(string);
+    // Save every tab now, before the application exits.
+    callback flush();
 }
 
 component WorkspaceIcon inherits Image {

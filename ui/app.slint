@@ -798,6 +798,7 @@ export component AppWindow inherits Window {
         // Hiding Settings destroys the dialog before its own change handlers
         // run, so an unsaved palette is discarded here.
         if root.settings_open { root.settings-shown(); } else { ThemeDraft.revert(); }
+        TabsUi.navigated();
     }
     // Settings appeared, whichever way it was opened.
     callback settings-shown();
@@ -809,8 +810,18 @@ export component AppWindow inherits Window {
     changed active_view => {
         if root.active_view != "mail" { MailAttachments.command("close", ""); }
         root.product-changed(root.active_view);
+        TabsUi.navigated();
     }
     in-out property <string> settings_tab: "General";
+    changed settings_tab => { TabsUi.navigated(); }
+    // The active tab saves where the mail view is once it settles.
+    changed selected_scope => { TabsUi.navigated(); }
+    changed search_query => { TabsUi.navigated(); }
+    changed search_filter => { TabsUi.navigated(); }
+    changed has_selected => { TabsUi.navigated(); }
+    changed selected_subject => { TabsUi.navigated(); }
+    changed calendar_selected_date => { TabsUi.navigated(); }
+    changed calendar_view_mode => { TabsUi.navigated(); }
     // Own scan lifetime here: the conditional SettingsDialog is destroyed on
     // close, so its own change handlers cannot reliably cancel a running scan.
     private property <bool> storage-page-open: root.settings_open && root.settings_tab == "Data";

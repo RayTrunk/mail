@@ -162,11 +162,12 @@ layout, arrow keys highlight messages and **Enter** opens them; **Escape** or
 ### 🗂️ Tabs
 
 Keep several places open at once with browser-style tabs. Each tab remembers
-its own location: a mailbox, search, or open conversation, or the calendar,
-contacts, or files. Middle-click or Ctrl/⌘-click a message to open it in a
-background tab (add Shift to switch to it), or choose **Open in new tab** from
-its menu. Drag tabs to reorder them, middle-click a tab to close it, and pick
-up where you left off the next time you open Flectar Mail.
+its own place: a mailbox, search, or open conversation, the calendar,
+contacts, files, or Settings, along with how far you scrolled the list and the
+message you were reading. Middle-click or Ctrl/⌘-click a message to open it in
+a background tab (add Shift to switch to it), or choose **Open in new tab**
+from its menu. Drag tabs to reorder them, middle-click a tab to close it, and
+pick up where you left off the next time you open Flectar Mail.
 
 **Ctrl/⌘+T** opens a new tab and **Ctrl/⌘+W** closes the current one.
 **Ctrl+Tab** and **Ctrl+Shift+Tab** cycle through tabs, **Ctrl/⌘+1–8** jump to

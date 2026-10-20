@@ -5,6 +5,7 @@ import { MailSidebar } from "../components/sidebar.slint";
 import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint";
 import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
+import { TabsUi } from "../components/workspace-navigation.slint";
 
 // Mail workspace composition. AppWindow owns the public state while this
 // component owns the feature layout, interaction wiring, and clipboard bridge.
@@ -86,6 +87,9 @@ export component MailView inherits FocusScope {
     out property <bool> list-focus-visible: root.single-pane
         ? compact-list-pane.keyboard-focus-visible : desktop-list-pane.keyboard-focus-visible;
     private property <bool> single-pane: root.compact || root.layout-mode == "minimal";
+    // The shown list's offset, saved with the tab when it is left.
+    private property <length> list-scroll-offset: -(root.single-pane ? compact-list-pane.scroll-y : desktop-list-pane.scroll-y);
+    changed list-scroll-offset => { TabsUi.list-offset = root.list-scroll-offset; }
     private property <length> list-pane-maximum-width: max(
         LayoutMetrics.list-pane-width,
         root.available-width - root.desktop-sidebar-width - LayoutMetrics.divider-width - LayoutMetrics.detail-pane-min-width
@@ -180,6 +184,8 @@ export component MailView inherits FocusScope {
     }
 
     init => {
+        // A new mail view starts at the top; an earlier view's offset is stale.
+        TabsUi.list-offset = root.list-scroll-offset;
         if root.single-pane && root.compact-page == "message" { root.focus-reader(); }
         else { root.focus-list(false); }
     }
@@ -280,6 +286,7 @@ export component MailView inherits FocusScope {
             }
 
             desktop-list-pane := MailListPane {
+                restores-scroll: !root.single-pane;
                 width: root.effective-list-pane-width;
                 show-avatars: root.show-avatars;
                 loading: root.loading;
@@ -497,6 +504,7 @@ export component MailView inherits FocusScope {
             }
 
             compact-list-pane := MailListPane {
+                restores-scroll: root.single-pane;
                 loading: root.loading;
                 visible: root.compact-page == "list";
                 x: root.single-pane-content-x

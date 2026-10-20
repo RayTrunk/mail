@@ -202,16 +202,38 @@ pub(super) fn register(
                 state.messages = page.messages;
                 state.labels = page.labels;
                 state.next_cursor = page.next_cursor;
+                // A restored tab whose conversation is not on the first page
+                // looks as far down as one read goes.
+                if state.pending_selection.is_some_and(|id| {
+                    state.next_cursor.is_some()
+                        && state.messages.len() <= PAGE_SIZE
+                        && !state.messages.iter().any(|row| row.id == id)
+                }) {
+                    drop(state);
+                    if let Err(error) = reload(&app, &page_state, &page_runtime, usize::MAX) {
+                        app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
+                    }
+                    continue;
+                }
                 // A restored tab reopens its conversation if it is still in
-                // the first page, and otherwise shows an empty reader rather
+                // the loaded rows, and otherwise shows an empty reader rather
                 // than an unrelated first row.
+                let opens = std::mem::take(&mut state.pending_selection_opens);
+                let mut open = None;
                 if let Some(id) = state.pending_selection.take() {
                     let found = state.messages.iter().any(|row| row.id == id);
                     state.selected_id = found.then_some(id);
                     state.preview_closed = !found;
+                    if !found {
+                        state.restore_thread_message = None;
+                    }
+                    open = (found && opens).then_some(id);
                 }
                 drop(state);
-                if let Err(error) = render_current(&app, &page_state, &page_runtime) {
+                // A background tab's conversation is opened as it is shown.
+                if let Some(id) = open {
+                    app.invoke_select_email(id);
+                } else if let Err(error) = render_current(&app, &page_state, &page_runtime) {
                     app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
                 }
             } else {
@@ -292,6 +314,17 @@ pub(super) fn refresh_rows(
     moved: &[i32],
 ) -> Result<(), String> {
     load(app, state, runtime, true, moved, Some(rows))
+}
+
+/// Replace the list with up to `rows` rows (at least a page, at most one
+/// read), for a tab that returns to a conversation further down.
+pub(super) fn reload(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    rows: usize,
+) -> Result<(), String> {
+    load(app, state, runtime, false, &[], Some(rows))
 }
 
 fn load(
@@ -378,6 +411,15 @@ pub(super) fn generation(state: &InboxState) -> u64 {
 /// A navigation load is in flight; its result supersedes a background one.
 pub(super) fn loading(state: &InboxState) -> bool {
     state.mail_work.as_ref().is_some_and(|work| work.loading)
+}
+
+/// A load that replaces the list is in flight, so the list is empty until it
+/// lands.
+pub(super) fn replacing(state: &InboxState) -> bool {
+    state
+        .mail_work
+        .as_ref()
+        .is_some_and(|work| work.loading && work.replace)
 }
 
 pub(super) fn invalidate(state: &mut InboxState) {

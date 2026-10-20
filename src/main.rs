@@ -591,6 +591,13 @@ struct InboxState {
     /// Conversation to select once the next replacing page arrives, for a
     /// tab restored without cached rows.
     pending_selection: Option<i32>,
+    /// Selecting the pending conversation opens it, which marks it read: a
+    /// background tab shown for the first time.
+    pending_selection_opens: bool,
+    /// Message a restored tab had open in a conversation, as (conversation
+    /// row id, message id). Loading that conversation opens this message
+    /// rather than the newest one.
+    restore_thread_message: Option<(i32, i32)>,
     checked_ids: HashSet<i32>,
     rendered_id: Option<i32>,
     preview_closed: bool,
@@ -1049,6 +1056,8 @@ impl InboxState {
             next_cursor: None,
             selected_id: None,
             pending_selection: None,
+            pending_selection_opens: false,
+            restore_thread_message: None,
             checked_ids: HashSet::new(),
             rendered_id: None,
             preview_closed: false,
@@ -2900,14 +2909,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     .any(|message| message.id == id);
             let selected_message_id = if selected_row.is_some_and(|row| row.id == id) {
                 selected_row.and_then(|row| {
-                    (state.conversation_owner_id == Some(row.id))
-                        .then(|| {
-                            state
-                                .conversation_messages
-                                .get(state.conversation_selected_index)
-                                .map(|message| i64::from(message.id))
-                        })
-                        .flatten()
+                    if state.conversation_owner_id == Some(row.id) {
+                        state
+                            .conversation_messages
+                            .get(state.conversation_selected_index)
+                            .map(|message| i64::from(message.id))
+                    } else {
+                        // A restored tab reopens the message it had open.
+                        state
+                            .restore_thread_message
+                            .filter(|(conversation, _)| *conversation == row.id)
+                            .map(|(_, message)| i64::from(message))
+                    }
                 })
             } else {
                 Some(i64::from(id))
@@ -3550,10 +3563,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         let is_selected =
                             state.selected_id == Some(update.id) && !state.preview_closed;
                         if is_selected {
-                            let selected_message_id = state
-                                .conversation_messages
-                                .get(state.conversation_selected_index)
-                                .map(|message| message.id);
+                            // A restored tab reopens the message it had open
+                            // when its conversation first loads.
+                            let restored = state
+                                .restore_thread_message
+                                .take_if(|(conversation, _)| *conversation == update.id)
+                                .filter(|_| state.conversation_owner_id != Some(update.id))
+                                .map(|(_, message)| message);
+                            let selected_message_id = restored.or_else(|| {
+                                state
+                                    .conversation_messages
+                                    .get(state.conversation_selected_index)
+                                    .map(|message| message.id)
+                            });
                             state.conversation_owner_id = Some(update.id);
                             state.conversation_messages = conversation.messages;
                             state.conversation_selected_index = selected_message_id
@@ -4228,6 +4250,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .filter(|removal| removal.removed)
                 .map(|removal| removal.account_id);
             if let Some(account_id) = removed_account_id {
+                // Tabs look up the account's mailboxes before they are dropped.
+                app.global::<TabsUi>()
+                    .invoke_account_removed(account_id.to_string().into());
                 reconcile_removed_account(&mut ui_task_state.borrow_mut(), account_id);
                 removal_body_pending.set(None);
                 removal_pagination_generation
@@ -7143,6 +7168,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let mut state = state_for_search.borrow_mut();
             state.query = query.to_string();
             state.pending_selection = None;
+            state.pending_selection_opens = false;
+            state.restore_thread_message = None;
             state.mail_groups.clear();
             state.page = 1;
             state.next_cursor = None;
@@ -7197,6 +7224,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             // reachable rather than presenting a list for no mailbox.
             state.set_scope(scope.parse().unwrap_or(Scope::UNIFIED_INBOX));
             state.pending_selection = None;
+            state.pending_selection_opens = false;
+            state.restore_thread_message = None;
             state.mail_groups.clear();
             state.page = 1;
             state.next_cursor = None;
@@ -7480,6 +7509,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     } else {
         slint::run_event_loop()
     };
+    // Timers stop with the event loop, so a pending tab save is written now.
+    app.global::<TabsUi>().invoke_flush();
     event_loop_result.map_err(|error| {
         renderer_preferences::startup_error(error, use_wgpu && !gpu_startup_completed.get())
     })?;

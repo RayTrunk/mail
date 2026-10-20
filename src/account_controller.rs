@@ -80,14 +80,19 @@ pub(super) fn snapshot_is_current(state: &Rc<RefCell<InboxState>>, revision: u64
 
 /// Whether the selected scope shows only mail of `account_id`.
 pub(super) fn account_owns_scope(state: &InboxState, account_id: i64) -> bool {
-    match state.scope {
+    scope_owned_by(state, state.scope, account_id)
+}
+
+/// Whether `scope` is one of the account's own mailboxes or labels.
+pub(super) fn scope_owned_by(state: &InboxState, scope: Scope, account_id: i64) -> bool {
+    match scope {
         Scope::Account {
             account_id: owner, ..
         } => owner == account_id,
         Scope::Folder(_) => state
             .mailboxes
             .iter()
-            .any(|mailbox| mailbox.account_id == account_id && mailbox.scope == Some(state.scope)),
+            .any(|mailbox| mailbox.account_id == account_id && mailbox.scope == Some(scope)),
         Scope::Label { id, .. } => state
             .labels
             .iter()

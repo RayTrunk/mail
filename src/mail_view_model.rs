@@ -287,6 +287,13 @@ pub(super) fn select_message(
         if state.query.trim().is_empty() && app.get_group_mail_by_date() {
             state.mail_groups.reveal(&mail_group_key(date_ms, Local::now()));
         }
+        // A restored tab's open message belongs to its own conversation.
+        if state
+            .restore_thread_message
+            .is_some_and(|(conversation, _)| conversation != id)
+        {
+            state.restore_thread_message = None;
+        }
         state.selected_id = Some(id);
         state.preview_closed = false;
     }
