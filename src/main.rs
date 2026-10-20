@@ -3174,6 +3174,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let calendar_for_core_updates = Rc::clone(&calendar_state);
     let mail_list_app = app.as_weak();
     let mail_list_refresh_in_progress_for_result = Rc::clone(&mail_list_refresh_in_progress);
+    let mail_list_refresh_requested_for_result = Rc::clone(&mail_list_refresh_requested);
     let mail_pagination_generation_for_result = Rc::clone(&mail_pagination_generation);
     let mail_pagination_in_progress_for_result = Rc::clone(&mail_pagination_in_progress);
     app.on_drain_mail_list_updates(move || {
@@ -3186,13 +3187,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             match update.kind {
                 MailListUpdateKind::Refresh => {
                     mail_list_refresh_in_progress_for_result.set(false);
-                    if update.scope == current_scope
-                        && update.query == current_query
+                    let same_view = update.scope == current_scope && update.query == current_query;
+                    let accepted = same_view
                         && mail_work::accepts_background(
                             &mail_update_state.borrow(),
                             update.view_generation,
-                        )
-                    {
+                        );
+                    if same_view && !accepted {
+                        // A navigation load started while this read ran and
+                        // may predate the change it carries; read again
+                        // once that load lands.
+                        mail_list_refresh_requested_for_result.set(true);
+                    }
+                    if accepted {
                         match update.result {
                             Ok(page) => apply_background_mail_page(
                                 &app,
@@ -3243,10 +3250,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         }
                     }
                     app.set_mail_loading_more(false);
-                    if !still_current {
-                        // A live refresh advanced the cursor while this page
-                        // was in flight. Re-check the current viewport so it
-                        // can immediately request the replacement cursor.
+                    // A live refresh advanced the cursor while this page was
+                    // in flight. Re-check the current viewport so it can
+                    // immediately request the replacement cursor; a
+                    // navigation load still running does that when it lands.
+                    if !still_current && !mail_work::loading(&mail_update_state.borrow()) {
                         app.set_mail_list_revision(app.get_mail_list_revision().wrapping_add(1));
                     }
                 }
@@ -3361,14 +3369,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             && mail_list_refresh_requested_for_core.get()
             && !mail_list_refresh_in_progress_for_core.get()
             && !mail_work::actions_pending(&mail_update_state.borrow())
+            && !mail_work::loading(&mail_update_state.borrow())
         {
-            let (using_core, core, scope, query) = {
+            let (using_core, core, scope, query, limit) = {
                 let state = mail_update_state.borrow();
                 (
                     state.using_core,
                     state.core.clone(),
                     state.scope,
                     state.query.clone(),
+                    mail_work::refresh_limit(state.messages.len(), &state.query),
                 )
             };
             if using_core && let Some(core) = core {
@@ -3377,9 +3387,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let view_generation = mail_work::generation(&mail_update_state.borrow());
                 let updates = mail_list_tx_for_core.clone();
                 mail_update_runtime.spawn(async move {
-                    let result = core
-                        .load_page(scope, &query, None, PAGE_SIZE as i64, false)
-                        .await;
+                    let result = core.load_page(scope, &query, None, limit, false).await;
                     let _ = updates
                         .send(MailListUpdate {
                             view_generation,
@@ -7656,7 +7664,7 @@ mod tests {
         let mut messages = fixture_messages();
         messages[1].folder = "Sent".into();
         messages[2].folder = "Archive".into();
-        let filtered = filtered_messages(&messages, Scope::UNIFIED_INBOX, "", "All mail");
+        let filtered = filtered_messages(&messages, Scope::UNIFIED_INBOX, "", "All mail", None);
 
         assert_eq!(filtered.len(), messages.len() - 2);
         assert!(filtered.iter().all(|email| email.folder == "Inbox"));
@@ -7680,7 +7688,7 @@ mod tests {
             account_id: flectar,
             mailbox: StandardMailbox::Inbox,
         };
-        let filtered = filtered_messages(&messages, scope, "calendar", "All mail");
+        let filtered = filtered_messages(&messages, scope, "calendar", "All mail", None);
 
         assert_eq!(filtered.len(), 2);
         assert!(filtered.iter().all(|email| email.sender == "Google Calendar"));
@@ -7701,9 +7709,10 @@ mod tests {
             Scope::Unified(StandardMailbox::Starred),
             "",
             "All mail",
+            None,
         );
         let attachments =
-            filtered_messages(&messages, Scope::UNIFIED_INBOX, "", "Has attachments");
+            filtered_messages(&messages, Scope::UNIFIED_INBOX, "", "Has attachments", None);
 
         assert_eq!(starred.len(), 1);
         assert_eq!(starred[0].id, messages[0].id);
@@ -7741,7 +7750,7 @@ mod tests {
             account_id: messages[0].account_id,
             mailbox: StandardMailbox::Starred,
         };
-        let filtered = filtered_messages(&messages, scope, "", "All mail");
+        let filtered = filtered_messages(&messages, scope, "", "All mail", None);
 
         assert!(filtered.iter().any(|message| message.id == messages[0].id));
         assert!(
