@@ -184,7 +184,7 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:125 ui/app.slint:875 ui/components/composer-fields.slint:66
+#: ui/app.slint:125 ui/app.slint:876 ui/components/composer-fields.slint:66
 #: ui/dialogs/compose-dialog.slint:37
 msgid "No connected account"
 msgstr ""
@@ -1346,73 +1346,73 @@ msgstr ""
 msgid "Loading message…"
 msgstr ""
 
-#: ui/app.slint:499 ui/components/workspace-navigation.slint:758
+#: ui/app.slint:499 ui/components/workspace-navigation.slint:826
 #: ui/tray.slint:12 ui/tray.slint:13
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1095 ui/app.slint:1108
+#: ui/app.slint:1107 ui/app.slint:1120
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:1977
+#: ui/app.slint:1990
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:1977 ui/views/files-view.slint:539
+#: ui/app.slint:1990 ui/views/files-view.slint:539
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:1981
+#: ui/app.slint:1994
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:1982
+#: ui/app.slint:1995
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:1984
+#: ui/app.slint:1997
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:1985
+#: ui/app.slint:1998
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:1986 ui/components/calendar.slint:937
+#: ui/app.slint:1999 ui/components/calendar.slint:937
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:1987
+#: ui/app.slint:2000
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:1987 ui/views/files-view.slint:621
+#: ui/app.slint:2000 ui/views/files-view.slint:621
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2157
+#: ui/app.slint:2170
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2163
+#: ui/app.slint:2176
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2176
+#: ui/app.slint:2189
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2179
+#: ui/app.slint:2192
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2184
+#: ui/app.slint:2197
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2192 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2205 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -2692,27 +2692,27 @@ msgstr ""
 msgid "Primary navigation"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:617
+#: ui/components/workspace-navigation.slint:680
 msgid "Close tab"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:637
+#: ui/components/workspace-navigation.slint:700
 msgid "New tab"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:641
+#: ui/components/workspace-navigation.slint:704
 msgid "Reopen closed tab"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:651
+#: ui/components/workspace-navigation.slint:714
 msgid "Close other tabs"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:656
+#: ui/components/workspace-navigation.slint:719
 msgid "Close tabs to the right"
 msgstr ""
 
-#: ui/components/workspace-navigation.slint:813
+#: ui/components/workspace-navigation.slint:884
 msgid "Tabs"
 msgstr ""
 

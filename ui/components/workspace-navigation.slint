@@ -401,9 +401,45 @@ component WorkspaceIcon inherits Image {
     accessible-role: none;
 }
 
-// A flat tab: icon, title and close button, with a hairline divider on its
-// right. The active tab takes the workspace color and covers the strip's
-// bottom border, so it opens into the content below.
+// Tabs share the strip's height below a small top margin.
+global TabMetrics {
+    out property <length> top: 6px;
+    // The active tab's corner radius, and how far its foot curves out on
+    // each side to meet the content below.
+    out property <length> radius: 8px;
+
+    // The line tab labels and "+" are centred on: a touch above the tab's
+    // middle, as its foot is open, and in line with the window controls.
+    public pure function middle(height: length) -> length {
+        return (height + root.top) / 2 - 2px;
+    }
+}
+
+// The active tab's outline: rounded top corners, and a foot that curves out
+// on both sides into the strip's bottom edge.
+component ActiveTabShape inherits Path {
+    private property <float> w: self.width / 1px;
+    private property <float> h: self.height / 1px;
+    private property <float> r: TabMetrics.radius / 1px;
+
+    viewbox-width: self.w;
+    viewbox-height: self.h;
+    accessible-role: none;
+
+    MoveTo { x: 0; y: root.h; }
+    ArcTo { x: root.r; y: root.h - root.r; radius-x: root.r; radius-y: root.r; sweep: false; }
+    LineTo { x: root.r; y: root.r; }
+    ArcTo { x: 2 * root.r; y: 0; radius-x: root.r; radius-y: root.r; sweep: true; }
+    LineTo { x: root.w - 2 * root.r; y: 0; }
+    ArcTo { x: root.w - root.r; y: root.r; radius-x: root.r; radius-y: root.r; sweep: true; }
+    LineTo { x: root.w - root.r; y: root.h - root.r; }
+    ArcTo { x: root.w; y: root.h; radius-x: root.r; radius-y: root.r; sweep: false; }
+    Close {}
+}
+
+// A tab: icon, title and close button. The active tab is the content's
+// color and curves into it; the others sit on the strip, divided by short
+// rules.
 component TabItem inherits Rectangle {
     in property <TabRow> entry;
     in property <int> index;
@@ -417,9 +453,16 @@ component TabItem inherits Rectangle {
     in property <color> title-color;
     in property <color> text-color;
     in property <color> accent-color;
+    // The content's color, and the sidebar's for a tab over the sidebar.
     in property <color> active-background;
+    in property <color> sidebar-background;
+    // Where the content starts beside the sidebar, from this tab's own place.
+    in property <length> pane-edge;
     in property <color> hover-background;
     in property <color> divider-color;
+    // The rule on the right; hidden next to the active or a hovered tab.
+    in property <bool> divided;
+    out property <bool> hovered: hit.has-hover && !hit.dragging;
     // Horizontal travel while this tab is dragged, and where it was dropped.
     callback dragged(length);
     callback dropped(length);
@@ -438,12 +481,13 @@ component TabItem inherits Rectangle {
         : (root.entry.title != "" ? root.entry.title : root.workspace-name);
     // Narrow tabs keep only their icon, as in a browser.
     private property <bool> labelled: root.width >= 72px;
-    private property <bool> hovered: hit.has-hover && !hit.dragging;
     private property <bool> truncated: !root.labelled || label.preferred-width > label.width;
     private property <bool> tooltip-due;
     // A click hides the tooltip until the pointer leaves.
     private property <bool> tooltip-dismissed;
     private property <length> offset: hit.dragging ? hit.travel : root.shift;
+    // The active tab opens into the pane below its middle.
+    private property <bool> over-content: root.offset + root.width / 2 >= root.pane-edge;
 
     function close() {
         root.closing();
@@ -457,7 +501,8 @@ component TabItem inherits Rectangle {
         hit.travel = 0px;
     }
 
-    z: hit.dragging ? 1 : 0;
+    // The active tab's foot overlaps its neighbours.
+    z: hit.dragging ? 2 : root.entry.active ? 1 : 0;
     changed hovered => {
         if !root.hovered {
             root.tooltip-due = false;
@@ -482,25 +527,42 @@ component TabItem inherits Rectangle {
             easing: ease-out;
         }
 
-        Rectangle {
-            // Inactive tabs leave the strip's bottom border showing.
-            y: 0px;
-            height: root.entry.active ? parent.height : parent.height - 1px;
-            background: root.entry.active ? root.active-background
-                : root.hovered ? root.hover-background : transparent;
+        if root.entry.active : ActiveTabShape {
+            x: -TabMetrics.radius;
+            y: TabMetrics.top;
+            width: parent.width + 2 * TabMetrics.radius;
+            height: parent.height - TabMetrics.top;
+            fill: root.over-content ? root.active-background : root.sidebar-background;
+        }
+        // Over the other pane, the strip's border still runs below the tab.
+        if root.entry.active : Rectangle {
+            property <length> edge: root.pane-edge - root.offset;
+            x: root.over-content ? -TabMetrics.radius : max(-TabMetrics.radius, self.edge);
+            y: parent.height - 1px;
+            width: max(0px, (root.over-content ? min(self.edge, parent.width + TabMetrics.radius)
+                : parent.width + TabMetrics.radius) - self.x);
+            height: 1px;
+            background: root.divider-color;
+        }
+        if !root.entry.active : Rectangle {
+            x: 2px;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
+            width: parent.width - 4px;
+            height: 30px;
+            border-radius: TabMetrics.radius - 1px;
+            background: root.hovered ? root.hover-background : transparent;
             animate background { duration: MotionSettings.enabled ? 120ms : 0ms; easing: ease-out; }
         }
-        Rectangle {
-            // The active tab's divider meets the border to its right.
+        if root.divided : Rectangle {
             x: parent.width - 1px;
-            y: 0px;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
             width: 1px;
-            height: root.entry.active ? parent.height : parent.height - 1px;
+            height: 16px;
             background: root.divider-color;
         }
         WorkspaceIcon {
             x: root.labelled ? 12px : (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
             width: 14px;
             height: 14px;
             workspace: root.workspace;
@@ -510,8 +572,9 @@ component TabItem inherits Rectangle {
         label := Text {
             visible: root.labelled;
             x: 34px;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
             width: max(0px, parent.width - self.x - 34px);
-            height: parent.height;
+            height: 2 * (parent.height - TabMetrics.middle(parent.height));
             text: root.title;
             color: root.entry.active || root.hovered ? root.title-color : root.text-color;
             font-size: TypeScale.secondary;
@@ -595,7 +658,7 @@ component TabItem inherits Rectangle {
             // Inside the tab's hit area, so pointing at it keeps the tab hovered.
             if root.labelled && (root.entry.active || root.hovered) : Rectangle {
                 x: root.offset + parent.width - 28px;
-                y: (parent.height - self.height) / 2;
+                y: TabMetrics.middle(parent.height) - self.height / 2;
                 width: 20px;
                 height: 20px;
                 border-radius: 4px;
@@ -737,15 +800,20 @@ component NewTabButton inherits Rectangle {
     }
 }
 
-// Desktop top bar with the tabs. It meets the product rail in the top-left
-// corner, where the integrated frame places leading window controls; trailing
-// controls sit in its right corner.
+// Desktop top bar with the tabs. It spans the window above the rail and the
+// sidebar: leading window controls, then the tabs. Trailing controls sit in
+// its right corner.
 export component WindowTopBar inherits Rectangle {
     // The active tab's live place: "settings" or a workspace, and its title.
     in property <string> live-workspace;
     in property <string> live-title;
+    // Where the workspace's content starts, past the product rail and any
+    // open sidebar.
+    in property <length> content-start;
     in property <color> background-color;
-    // The workspace color the active tab opens into.
+    // The colors the active tab opens into: the rail and sidebar's, and the
+    // content's.
+    in property <color> sidebar-background;
     in property <color> active-tab-background;
     in property <color> hover-background;
     in property <color> divider-color;
@@ -757,15 +825,16 @@ export component WindowTopBar inherits Rectangle {
     accessible-role: window-title-bar;
     accessible-label: @tr("Flectar Mail");
 
-    // Tabs start at the window edge unless leading controls need the room.
-    private property <length> tabs-x: WindowChrome.leading-width;
+    // The first tab's foot curves out just after the leading window
+    // controls.
+    private property <length> tabs-x: WindowChrome.leading-width + TabMetrics.radius + 2px;
     private property <length> trailing: WindowChrome.trailing-width + 8px;
     private property <int> count: TabsUi.rows.length;
     // Tabs share the room up to the new-tab button. In the integrated frame
     // some of the bar stays free to drag the window by, however many tabs.
     // At the narrowest desktop width, 32 tabs still fit as icons.
     private property <length> drag-room: WindowChrome.controls-visible ? 48px : 0px;
-    private property <length> tabs-room: max(0px, root.width - root.tabs-x - 40px - root.drag-room - root.trailing);
+    private property <length> tabs-room: max(0px, root.width - root.tabs-x - 44px - root.drag-room - root.trailing);
     private property <length> fitted-slot-width: root.count == 0 ? 0px
         : max(22px, min(240px, root.tabs-room / root.count));
     // Tabs closed one after another keep their width, and the strip its
@@ -792,6 +861,8 @@ export component WindowTopBar inherits Rectangle {
         root.drag-index = -1;
         root.drag-travel = 0px;
     }
+    // The hovered tab hides its rules like the active one.
+    private property <int> hovered-index: -1;
 
     if WindowChrome.controls-visible : WindowDragArea {
         width: parent.width;
@@ -813,15 +884,6 @@ export component WindowTopBar inherits Rectangle {
         accessible-label: @tr("Tabs");
         accessible-item-count: root.count;
 
-        // Leading window controls end in a divider like the tabs'.
-        if root.tabs-x > 0 : Rectangle {
-            x: -1px;
-            y: 0px;
-            width: 1px;
-            height: parent.height - 1px;
-            background: root.divider-color;
-        }
-
         for tab-row[index] in TabsUi.rows : TabItem {
             x: index * root.slot-width;
             width: root.slot-width;
@@ -836,12 +898,25 @@ export component WindowTopBar inherits Rectangle {
                 : index > root.drag-index && index <= root.drop-index ? -root.slot-width
                 : index < root.drag-index && index >= root.drop-index ? root.slot-width
                 : 0px;
+            // Rules only separate two resting tabs.
+            divided: index < root.count - 1 && root.drag-index < 0
+                && !tab-row.active && !TabsUi.rows[index + 1].active
+                && root.hovered-index != index && root.hovered-index != index + 1;
             title-color: root.title-color;
             text-color: root.text-color;
             accent-color: root.accent-color;
             active-background: root.active-tab-background;
+            sidebar-background: root.sidebar-background;
+            pane-edge: root.content-start - root.tabs-x - index * root.slot-width;
             hover-background: root.hover-background;
             divider-color: root.divider-color;
+            changed hovered => {
+                if self.hovered {
+                    root.hovered-index = index;
+                } else if root.hovered-index == index {
+                    root.hovered-index = -1;
+                }
+            }
             dragged(travel) => {
                 root.drag-index = travel == 0px ? -1 : index;
                 root.drag-travel = travel;
@@ -864,8 +939,8 @@ export component WindowTopBar inherits Rectangle {
     }
 
     new-tab := NewTabButton {
-        x: root.tabs-x + strip.width + 4px;
-        y: (parent.height - self.height) / 2;
+        x: root.tabs-x + strip.width + TabMetrics.radius;
+        y: TabMetrics.middle(parent.height) - self.height / 2;
         hover-background: root.hover-background;
         icon-color: root.text-color;
     }
